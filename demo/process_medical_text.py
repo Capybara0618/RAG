@@ -1,22 +1,38 @@
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 import json
 import requests
+from typing import List, Dict
 
-def read_medical_text(file_path):
+def read_medical_text(file_path: str) -> str:
     """读取医疗文本文件"""
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-def split_text(text):
-    """将文本分割成小块"""
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,  # 每个文本块的大小
-        chunk_overlap=50,  # 文本块之间的重叠部分
-        separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]  # 分割符
-    )
-    return text_splitter.split_text(text)
+def extract_diseases(text: str) -> List[Dict]:
+    diseases = []
+    current_name = None
+    current_lines = []
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if line.startswith('## '):
+            if current_name and current_lines:
+                diseases.append({
+                    'name': current_name,
+                    'text': '\n'.join(current_lines).strip()
+                })
+            current_name = line[3:].strip()
+            current_lines = []
+        elif current_name:
+            current_lines.append(line)
+    # 最后一个疾病
+    if current_name and current_lines:
+        diseases.append({
+            'name': current_name,
+            'text': '\n'.join(current_lines).strip()
+        })
+    return diseases
 
-def get_embedding(text):
+def get_embedding(text: str) -> List[float]:
     """使用 Ollama 获取文本的向量表示"""
     response = requests.post(
         "http://localhost:11434/api/embeddings",
@@ -29,19 +45,20 @@ def process_and_save():
     # 读取文本
     text = read_medical_text('demo/medical_knowledge.txt')
     
-    # 分割文本
-    chunks = split_text(text)
-    print(f"文本被分割成 {len(chunks)} 个块")
+    # 提取疾病信息
+    diseases = extract_diseases(text)
+    print(f"提取了 {len(diseases)} 个疾病")
     
-    # 处理每个文本块
+    # 处理每个疾病
     results = []
-    for i, chunk in enumerate(chunks, 1):
-        print(f"正在处理第 {i}/{len(chunks)} 个文本块")
-        embedding = get_embedding(chunk)
+    for disease in diseases:
+        emb = get_embedding(disease['text'])
         results.append({
-            "text": chunk,
-            "embedding": embedding
+            'name': disease['name'],
+            'text': disease['text'],
+            'embedding': emb
         })
+        print(f"已处理: {disease['name']}")
     
     # 保存结果
     with open('demo/medical_embeddings.json', 'w', encoding='utf-8') as f:
